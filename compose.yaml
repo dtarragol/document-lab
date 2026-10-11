@@ -1,0 +1,12 @@
+services:
+  api:
+    build: .
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      DATA_DIR: /app/data
+      MAX_UPLOAD_BYTES: "10485760"
+    volumes:
+      - document_data:/app/data
+volumes:
+  document_data:
