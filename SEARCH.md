@@ -21,3 +21,22 @@ Conceptos: extracción convierte el archivo en texto; indexación prepara ese te
 consulta recupera documentos y fragmentos. Este es el paso de recuperación previo
 a una futura práctica RAG, todavía sin un modelo de lenguaje ni Azure AI Search.
 Requiere Python con SQLite FTS5 habilitado (incluido en el entorno utilizado para pruebas).
+
+## Recuperación de fragmentos
+
+POST /documents/{id}/index también divide el texto en fragmentos de 120 palabras,
+con 20 palabras de solapamiento. Reindexa los documentos indexados antes de esta mejora.
+Los números de fragmento empiezan en 0; la fragmentación normaliza los espacios.
+
+GET /retrieve?q=Cosmos&top_k=3 devuelve hasta tres fragmentos ordenados por BM25,
+con document_id, filename, chunk_number y text. La respuesta conserva las fuentes
+para poder construir referencias después. Un documento puede aportar varios fragmentos.
+No devuelve páginas ni posiciones originales, ni elimina fragmentos solapados.
+
+Los términos de la consulta deben estar en el mismo fragmento; /search permite
+que estén en lugares diferentes del documento. Utiliza palabras clave, no preguntas
+largas: esta recuperación es léxica con AND, no semántica. El tamaño se mide en palabras,
+no tokens de un modelo. top_k es la cantidad máxima de fragmentos recuperados.
+
+Esto implementa recuperación y fragmentación, no RAG completo. generated_answer es null:
+no se llama a un LLM. No hay embeddings, búsqueda vectorial ni control de acceso por revisión.

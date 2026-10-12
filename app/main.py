@@ -14,6 +14,7 @@ from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from app.text import TextError, analyze_text, extract_text
+from app.retrieval import chunk_text, literal_query
 
 logger = logging.getLogger("document_lab")
 logging.basicConfig(level=logging.INFO)
@@ -78,6 +79,8 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
                 document_id TEXT PRIMARY KEY, decision TEXT NOT NULL, decided_at TEXT NOT NULL)''')
             connection.execute('''CREATE VIRTUAL TABLE IF NOT EXISTS document_search
                 USING fts5(document_id UNINDEXED, content, tokenize='unicode61')''')
+            connection.execute('''CREATE VIRTUAL TABLE IF NOT EXISTS document_chunks
+                USING fts5(document_id UNINDEXED, chunk_number UNINDEXED, content, tokenize='unicode61')''')
         yield
 
     app = FastAPI(title="Document Lab · AI-200", version="0.1.0",
@@ -198,20 +201,24 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             text = extract_text(root / 'files' / str(document_id), document['filename'])
         except TextError as error:
             raise HTTPException(422, str(error)) from error
+        chunks = chunk_text(text)
         with database() as connection:
             connection.execute('BEGIN IMMEDIATE')
             connection.execute('DELETE FROM document_search WHERE document_id=?', (str(document_id),))
             connection.execute('INSERT INTO document_search (document_id, content) VALUES (?, ?)',
                                (str(document_id), text))
-        return {'document_id': str(document_id), 'indexed_characters': len(text)}
+            connection.execute('DELETE FROM document_chunks WHERE document_id=?', (str(document_id),))
+            connection.executemany('INSERT INTO document_chunks (document_id, chunk_number, content) VALUES (?, ?, ?)',
+                                   [(str(document_id), number, chunk) for number, chunk in enumerate(chunks)])
+        return {'document_id': str(document_id), 'indexed_characters': len(text), 'chunks': len(chunks)}
 
     @app.get('/search', tags=['Búsqueda local'])
     def search(q: str = Query(min_length=1, max_length=200), limit: int = Query(default=10, ge=1, le=50)):
         # Cada término es literal: no exponemos operadores ni sintaxis de FTS al usuario.
-        terms = q.split()
-        if not terms:
-            raise HTTPException(422, 'Introduce al menos una palabra')
-        expression = ' AND '.join('"' + term.replace('"', '""') + '"' for term in terms)
+        try:
+            expression = literal_query(q)
+        except ValueError as error:
+            raise HTTPException(422, str(error)) from error
         with database() as connection:
             rows = connection.execute('''SELECT d.id, d.filename,
                 snippet(document_search, 1, '[', ']', '...', 32) AS excerpt
@@ -219,6 +226,23 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
                 WHERE document_search MATCH ? ORDER BY bm25(document_search), d.id LIMIT ?''',
                 (expression, limit)).fetchall()
         return {'query': q, 'count': len(rows), 'results': [dict(row) for row in rows]}
+
+    @app.get('/retrieve', tags=['Recuperación local'])
+    def retrieve(q: str = Query(min_length=1, max_length=200), top_k: int = Query(default=3, ge=1, le=10)):
+        try:
+            expression = literal_query(q)
+        except ValueError as error:
+            raise HTTPException(422, str(error)) from error
+        with database() as connection:
+            rows = connection.execute('''SELECT d.id AS document_id, d.filename,
+                CAST(document_chunks.chunk_number AS INTEGER) AS chunk_number,
+                document_chunks.content AS text
+                FROM document_chunks JOIN documents d ON d.id=document_chunks.document_id
+                WHERE document_chunks MATCH ?
+                ORDER BY bm25(document_chunks), d.id, CAST(document_chunks.chunk_number AS INTEGER) LIMIT ?''',
+                (expression, top_k)).fetchall()
+        return {'query': q, 'count': len(rows), 'sources': [dict(row) for row in rows],
+                'retrieval_mode': 'lexical', 'generated_answer': None}
 
     @app.post('/documents/{document_id}/review', tags=['Revisión humana local'])
     def review(document_id: UUID, request: ReviewRequest):
