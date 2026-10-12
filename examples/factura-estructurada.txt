@@ -1,0 +1,5 @@
+FACTURA F-2026-001
+Proveedor: Taller Ejemplo SL
+Fecha de emision: 12 de octubre de 2026
+Concepto: mantenimiento
+Total con impuestos: 120,50 EUR

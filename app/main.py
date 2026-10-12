@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 from app.text import TextError, analyze_text, extract_text
 from app.retrieval import chunk_text, literal_query
 from app.rag import prepare_messages
+from app.model_calls import call_model
 
 logger = logging.getLogger("document_lab")
 logging.basicConfig(level=logging.INFO)
@@ -118,6 +119,7 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
                 USING fts5(document_id UNINDEXED, chunk_number UNINDEXED, content, tokenize='unicode61')''')
             connection.execute('''CREATE TABLE IF NOT EXISTS llm_calls (
                 id TEXT PRIMARY KEY, day TEXT NOT NULL, status TEXT NOT NULL, usage TEXT)''')
+            connection.execute('CREATE TABLE IF NOT EXISTS extractions (document_id TEXT PRIMARY KEY, result TEXT NOT NULL)')
         yield
 
     app = FastAPI(title="Document Lab · AI-200", version="0.1.0",
@@ -322,29 +324,29 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             return {'answer': 'No se han encontrado fuentes para responder.', 'sources': [], 'status': 'no_sources', 'usage': {}}
         if sum(len(message['content']) for message in context['messages']) > 12000:
             raise HTTPException(422, 'Contexto demasiado largo: reduce top_k o utiliza fragmentos más cortos')
-        try:
-            limit = int(os.getenv('LLM_DAILY_CALL_LIMIT', '20'))
-        except ValueError:
-            raise HTTPException(503, 'LLM_DAILY_CALL_LIMIT debe ser un entero')
-        call_id = str(uuid4())
-        day = datetime.now(timezone.utc).date().isoformat()
+        result = call_model(root, generate, context['messages'])
+        return dict(result, sources=context['sources'], status='generated')
+
+    @app.post('/documents/{document_id}/extract', tags=['Extracción con Azure'])
+    def extract(document_id: UUID):
+        from app.invoice import extract_invoice
+        document = fetch(document_id)
         with database() as connection:
-            connection.execute('BEGIN IMMEDIATE')
-            count = connection.execute('SELECT COUNT(*) FROM llm_calls WHERE day=?', (day,)).fetchone()[0]
-            if count >= limit:
-                raise HTTPException(429, 'Límite diario de llamadas alcanzado')
-            connection.execute('INSERT INTO llm_calls VALUES (?, ?, ?, NULL)', (call_id, day, 'Reserved'))
+            row = connection.execute('SELECT result FROM extractions WHERE document_id=?', (str(document_id),)).fetchone()
+        if row:
+            return dict(json.loads(row['result']), cached=True)
         try:
-            result = generate(context['messages'])
-        except (ValueError, AzureError, httpx.HTTPError, KeyError, IndexError) as error:
+            text = extract_text(root / 'files' / str(document_id), document['filename'])
+        except TextError as error:
+            raise HTTPException(422, str(error)) from error
+        if len(text) > 12000:
+            raise HTTPException(422, 'La extracción de facturas admite hasta 12000 caracteres; no se trunca el documento')
+        result = dict(call_model(root, extract_invoice, text), document_id=str(document_id), cached=False)
+        if result['status'] == 'extracted':
             with database() as connection:
-                connection.execute("UPDATE llm_calls SET status='Failed' WHERE id=?", (call_id,))
-            logger.warning('llm_call_failed id=%s type=%s', call_id, type(error).__name__)
-            raise HTTPException(503, 'Falló la llamada al modelo: revisa endpoint, az login, permisos y cuota') from error
-        with database() as connection:
-            connection.execute("UPDATE llm_calls SET status='Completed', usage=? WHERE id=?",
-                               (json.dumps(result['usage']), call_id))
-        return dict(result, sources=context['sources'], status='generated', call_id=call_id)
+                connection.execute('INSERT OR IGNORE INTO extractions VALUES (?, ?)',
+                                   (str(document_id), json.dumps(result)))
+        return result
 
     @app.post('/documents/{document_id}/review', tags=['Revisión humana local'])
     def review(document_id: UUID, request: ReviewRequest):
