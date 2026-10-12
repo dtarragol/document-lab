@@ -1,5 +1,7 @@
 # Document Lab — primera práctica AI-200
 
+**Práctica sin esperar a Azure:** [QUEUE.md](QUEUE.md), cola persistente y worker local.
+
 API Python para subir documentos, consultar su estado y ejecutar un análisis simulado.
 FastAPI ofrece la interfaz interactiva en http://localhost:8000/docs.
 
