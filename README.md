@@ -1,5 +1,20 @@
 # Document Lab — primera práctica AI-200
 
+**Búsqueda por contenido:** [SEARCH.md](SEARCH.md), índice local FTS5 y recuperación de fragmentos.
+
+## Práctica completa en un comando
+
+Con requirements-dev.txt instalado, ejecuta `python -m app.demo` desde esta carpeta.
+Usa la API local mediante TestClient, dos procesos worker y una carpeta temporal.
+Comprueba subida, cola, clasificación por contenido, aprobación, rechazo y persistencia
+tras reiniciar la API. No necesita servidor, puertos ni Azure. No modifica data-queue;
+los documentos de la demo se eliminan al salir y no aparecen en tu Swagger habitual.
+
+**Actualización del modo local:** TXT UTF-8 y DOCX se clasifican por su contenido,
+no por el nombre. GET /documents/{id}/text muestra hasta 4000 caracteres extraídos.
+No hay OCR ni soporte de extracción PDF. Los resultados anteriores se conservan;
+sube un documento nuevo para probarlo. El modo Azure aún clasifica por nombre.
+
 **Práctica sin esperar a Azure:** [QUEUE.md](QUEUE.md), cola persistente y worker local.
 
 **Revisión humana:** [REVIEW.md](REVIEW.md), aprobar o rechazar después del análisis.
@@ -64,9 +79,9 @@ repetición de análisis, nombres de archivo seguros, documentos vacíos, límit
 - `DATA_DIR`: carpeta de persistencia; por defecto `data`.
 - `MAX_UPLOAD_BYTES`: límite por documento; por defecto 10 MiB.
 
-El análisis es deliberadamente simulado: el nombre que contenga `factura` o `invoice`
+El análisis es deliberadamente simulado: el texto que contenga `factura` o `invoice`
 se clasifica como `invoice`; el resto como `other`. La confianza fija es 0.72 y siempre
-requiere revisión. No extrae texto, no interpreta PDF ni llama a un modelo de IA.
+requiere revisión. Extrae texto de TXT y del cuerpo principal de DOCX; no interpreta PDF ni llama a un modelo de IA.
 Admite archivos no vacíos hasta el límite configurado; el tipo MIME es metadato declarado por el cliente.
 
 Esta fase no utiliza Azure, Durable Functions ni autenticación. Está pensada para tu equipo;

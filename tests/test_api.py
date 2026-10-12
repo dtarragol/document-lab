@@ -8,11 +8,11 @@ from app.main import create_app
 def test_upload_analysis_and_restart(tmp_path):
     with TestClient(create_app(tmp_path)) as client:
         assert client.get("/health").status_code == 200
-        response = client.post("/documents", files={"file": ("../../factura.txt", b"demo", "text/plain")})
+        response = client.post("/documents", files={"file": ("../../factura.txt", b"factura", "text/plain")})
         assert response.status_code == 201
         document = response.json()
         assert document["filename"] == "factura.txt"
-        assert document["size_bytes"] == 4
+        assert document["size_bytes"] == 7
         url = f"/documents/{document['id']}"
         analyzed = client.post(url + "/analyze").json()
         assert analyzed["analysis"] == {"category": "invoice", "confidence": 0.72,
@@ -20,7 +20,7 @@ def test_upload_analysis_and_restart(tmp_path):
         assert client.post(url + "/analyze").json() == analyzed
     with TestClient(create_app(tmp_path)) as restarted:
         assert restarted.get(url).json() == analyzed
-    assert (tmp_path / "files" / document["id"]).read_bytes() == b"demo"
+    assert (tmp_path / "files" / document["id"]).read_bytes() == b"factura"
 
 
 def test_errors_and_cleanup(tmp_path, monkeypatch):

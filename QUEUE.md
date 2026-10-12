@@ -67,6 +67,12 @@ intento completa el trabajo y limpia last_error. Aquí los reintentos son manual
 sin backoff. Solo los fallos controlados cuentan para este límite: un error inesperado
 de SQLite o una interrupción revierte la transacción y detiene el proceso.
 
+Actualización: los errores de extracción TXT/DOCX también cuentan como intentos y
+se guardan en last_error. Otros errores inesperados siguen deteniendo el worker.
+El worker continuo puede agotar los tres intentos de lectura seguidos, sin espera
+entre ellos: aún no hay backoff. El cálculo local incluye ahora la lectura acotada
+del documento, dentro de la transacción; sigue siendo una implementación educativa.
+
 ## Recuperar un trabajo apartado
 
 Detén el worker continuo. Consulta GET /jobs/{id} y revisa last_error antes de recuperar.

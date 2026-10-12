@@ -16,7 +16,7 @@ def test_queue_survives_restart_and_duplicate_requests(tmp_path):
     with TestClient(create_app(tmp_path)) as client:
         item = client.get(url).json()
         assert item['status'] == 'Analyzed'
-        assert item['analysis']['category'] == 'invoice'
+        assert item['analysis']['category'] == 'other'
         assert client.post(url + '/enqueue').json()['status'] == 'AlreadyAnalyzed'
     assert not process_one(tmp_path)
 

@@ -10,9 +10,10 @@ from pathlib import Path
 from typing import Literal
 from uuid import UUID, uuid4
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
+from app.text import TextError, analyze_text, extract_text
 
 logger = logging.getLogger("document_lab")
 logging.basicConfig(level=logging.INFO)
@@ -75,6 +76,8 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
                 connection.execute('ALTER TABLE jobs ADD COLUMN last_error TEXT')
             connection.execute('''CREATE TABLE IF NOT EXISTS reviews (
                 document_id TEXT PRIMARY KEY, decision TEXT NOT NULL, decided_at TEXT NOT NULL)''')
+            connection.execute('''CREATE VIRTUAL TABLE IF NOT EXISTS document_search
+                USING fts5(document_id UNINDEXED, content, tokenize='unicode61')''')
         yield
 
     app = FastAPI(title="Document Lab · AI-200", version="0.1.0",
@@ -141,9 +144,11 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
         # Repetir esta operación devuelve el resultado existente.
         if document["analysis"] is not None:
             return document
-        name = document["filename"].lower()
-        category = "invoice" if any(word in name for word in ("invoice", "factura")) else "other"
-        result = Analysis(category=category, confidence=0.72, requires_review=True)
+        try:
+            text = extract_text(root / 'files' / str(document_id), document['filename'])
+        except TextError as error:
+            raise HTTPException(422, str(error)) from error
+        result = Analysis(**analyze_text(text))
         with database() as connection:
             if connection.execute("SELECT 1 FROM jobs WHERE document_id=? AND status='Pending'",
                                   (str(document_id),)).fetchone():
@@ -168,6 +173,16 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             connection.execute("UPDATE documents SET status='Queued' WHERE id=?", (str(document_id),))
         return {"document_id": str(document_id), "status": "Pending"}
 
+    @app.get('/documents/{document_id}/text', tags=['Extracción local'])
+    def get_text(document_id: UUID):
+        document = fetch(document_id)
+        try:
+            text = extract_text(root / 'files' / str(document_id), document['filename'])
+        except TextError as error:
+            raise HTTPException(422, str(error)) from error
+        return {'document_id': str(document_id), 'characters': len(text),
+                'text': text[:4000], 'truncated': len(text) > 4000}
+
     @app.get('/jobs/{document_id}', tags=['Cola local'])
     def get_job(document_id: UUID):
         with database() as connection:
@@ -175,6 +190,35 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
         if row is None:
             raise HTTPException(404, 'Trabajo no encontrado')
         return dict(row)
+
+    @app.post('/documents/{document_id}/index', tags=['Búsqueda local'])
+    def index_document(document_id: UUID):
+        document = fetch(document_id)
+        try:
+            text = extract_text(root / 'files' / str(document_id), document['filename'])
+        except TextError as error:
+            raise HTTPException(422, str(error)) from error
+        with database() as connection:
+            connection.execute('BEGIN IMMEDIATE')
+            connection.execute('DELETE FROM document_search WHERE document_id=?', (str(document_id),))
+            connection.execute('INSERT INTO document_search (document_id, content) VALUES (?, ?)',
+                               (str(document_id), text))
+        return {'document_id': str(document_id), 'indexed_characters': len(text)}
+
+    @app.get('/search', tags=['Búsqueda local'])
+    def search(q: str = Query(min_length=1, max_length=200), limit: int = Query(default=10, ge=1, le=50)):
+        # Cada término es literal: no exponemos operadores ni sintaxis de FTS al usuario.
+        terms = q.split()
+        if not terms:
+            raise HTTPException(422, 'Introduce al menos una palabra')
+        expression = ' AND '.join('"' + term.replace('"', '""') + '"' for term in terms)
+        with database() as connection:
+            rows = connection.execute('''SELECT d.id, d.filename,
+                snippet(document_search, 1, '[', ']', '...', 32) AS excerpt
+                FROM document_search JOIN documents d ON d.id=document_search.document_id
+                WHERE document_search MATCH ? ORDER BY bm25(document_search), d.id LIMIT ?''',
+                (expression, limit)).fetchall()
+        return {'query': q, 'count': len(rows), 'results': [dict(row) for row in rows]}
 
     @app.post('/documents/{document_id}/review', tags=['Revisión humana local'])
     def review(document_id: UUID, request: ReviewRequest):

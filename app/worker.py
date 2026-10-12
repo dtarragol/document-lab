@@ -5,6 +5,7 @@ import os
 import sqlite3
 import time
 from pathlib import Path
+from app.text import TextError, analyze_text, extract_text
 
 
 def process_one(root: Path, simulate_failure: bool = False) -> bool:
@@ -19,21 +20,27 @@ def process_one(root: Path, simulate_failure: bool = False) -> bool:
             connection.rollback()
             return False
         doc_id = job['document_id']
-        if simulate_failure:
+        document = connection.execute('SELECT filename, analysis FROM documents WHERE id=?', (doc_id,)).fetchone()
+        error_message = None
+        result = None
+        if document['analysis'] is None:
+            try:
+                if simulate_failure:
+                    raise TextError('Fallo simulado de análisis')
+                result = analyze_text(extract_text(root / 'files' / doc_id, document['filename']))
+            except TextError as error:
+                error_message = str(error)
+        if error_message:
             attempts = job['attempts'] + 1
             status = 'DeadLetter' if attempts >= 3 else 'Pending'
             connection.execute('UPDATE jobs SET attempts=?, status=?, last_error=? WHERE document_id=?',
-                               (attempts, status, 'Fallo simulado de análisis', doc_id))
+                               (attempts, status, error_message, doc_id))
             connection.execute('UPDATE documents SET status=? WHERE id=?',
                                ('Failed' if status == 'DeadLetter' else 'Queued', doc_id))
             connection.commit()
-            print(f'Fallo simulado: {doc_id}, intento={attempts}, estado={status}', flush=True)
+            print(f'Fallo: {doc_id}, intento={attempts}, estado={status}, error={error_message}', flush=True)
             return True
-        document = connection.execute('SELECT filename, analysis FROM documents WHERE id=?', (doc_id,)).fetchone()
         if document['analysis'] is None:
-            name = document['filename'].lower()
-            result = dict(category='invoice' if any(w in name for w in ('invoice', 'factura')) else 'other',
-                          confidence=0.72, requires_review=True, simulated=True)
             connection.execute("UPDATE documents SET status='Analyzed', analysis=? WHERE id=?",
                                (json.dumps(result), doc_id))
         connection.execute("UPDATE jobs SET status='Completed', attempts=attempts+1, last_error=NULL WHERE document_id=?", (doc_id,))
