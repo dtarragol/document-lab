@@ -1,0 +1,10 @@
+[
+  {
+    "query": "PostgreSQL",
+    "expected_filename": "DOSSIER_PostgreSQL_VectorSearch_Completo.docx"
+  },
+  {
+    "query": "Cómo realizar búsquedas vectoriales en PostgreSQL",
+    "expected_filename": "DOSSIER_PostgreSQL_VectorSearch_Completo.docx"
+  }
+]
