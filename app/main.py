@@ -48,6 +48,7 @@ class RagRequest(BaseModel):
     question: str = Field(min_length=1, max_length=1000)
     search_query: str = Field(min_length=1, max_length=200)
     top_k: int = Field(default=3, ge=1, le=10)
+    retrieval_mode: Literal['lexical', 'vector', 'hybrid'] | None = None
 
 
 def create_app(data_dir: Path | None = None) -> FastAPI:
@@ -64,6 +65,21 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
         from azure.core.exceptions import AzureError
         try:
             return operation(*args)
+        except ValueError as error:
+            raise HTTPException(422, str(error)) from error
+        except httpx.HTTPStatusError as error:
+            status = error.response.status_code
+            detail = f'Azure devolvió HTTP {status}. '
+            if status == 429:
+                detail += 'Cuota temporal alcanzada; espera antes de volver a intentarlo.'
+            elif status in (401, 403):
+                detail += 'Revisa az login y los permisos del recurso.'
+            elif status == 404:
+                detail += 'Comprueba el nombre del índice o del despliegue del modelo.'
+            else:
+                detail += 'Revisa que el esquema del índice coincida con la configuración.'
+            logger.warning('azure_search_failed status=%s', status)
+            raise HTTPException(429 if status == 429 else 503, detail) from error
         except (httpx.HTTPError, AzureError, ValueError, RuntimeError, KeyError) as error:
             logger.warning('azure_search_failed type=%s', type(error).__name__)
             raise HTTPException(503, 'Error de Azure Search: revisa índice, permisos, tamaño y conectividad') from error
@@ -215,7 +231,7 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             raise HTTPException(404, 'Trabajo no encontrado')
         return dict(row)
 
-    @app.post('/documents/{document_id}/index', tags=['Búsqueda local'])
+    @app.post('/documents/{document_id}/index', tags=['Indexación'])
     def index_document(document_id: UUID):
         document = fetch(document_id)
         try:
@@ -252,17 +268,20 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
                 (expression, limit)).fetchall()
         return {'query': q, 'count': len(rows), 'results': [dict(row) for row in rows]}
 
-    @app.get('/retrieve', tags=['Recuperación local'])
-    def retrieve(q: str = Query(min_length=1, max_length=200), top_k: int = Query(default=3, ge=1, le=10)):
+    @app.get('/retrieve', tags=['Recuperación'])
+    def retrieve(q: str = Query(min_length=1, max_length=200), top_k: int = Query(default=3, ge=1, le=10),
+                 mode: Literal['lexical', 'vector', 'hybrid'] | None = None):
         try:
             expression = literal_query(q)
         except ValueError as error:
             raise HTTPException(422, str(error)) from error
         if search_backend == 'azure':
             from app.azure_search import retrieve_chunks
-            sources = search_operation(retrieve_chunks, q, top_k)
+            sources = search_operation(retrieve_chunks, q, top_k) if mode is None else search_operation(retrieve_chunks, q, top_k, mode)
             return {'query': q, 'count': len(sources), 'sources': sources,
-                    'retrieval_mode': 'azure_lexical', 'generated_answer': None}
+                    'retrieval_mode': 'azure_' + (mode or os.getenv('AZURE_SEARCH_MODE', 'lexical')), 'generated_answer': None}
+        if mode not in (None, 'lexical'):
+            raise HTTPException(422, 'La búsqueda vectorial requiere SEARCH_BACKEND=azure')
         with database() as connection:
             rows = connection.execute('''SELECT d.id AS document_id, d.filename,
                 CAST(document_chunks.chunk_number AS INTEGER) AS chunk_number,
@@ -278,7 +297,7 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
     def prepare_rag(request: RagRequest):
         if not request.question.strip():
             raise HTTPException(422, 'Introduce una pregunta')
-        retrieved = retrieve(request.search_query, request.top_k)
+        retrieved = retrieve(request.search_query, request.top_k, request.retrieval_mode)
         return prepare_messages(request.question, retrieved['sources'])
 
     @app.post('/rag/ask', tags=['RAG con Azure'])

@@ -1,5 +1,7 @@
 # Document Lab — primera práctica AI-200
 
+**Vectores e híbrida:** [VECTORS.md](VECTORS.md), embeddings Azure con caché y comparación de modos.
+
 **Recuperación en Azure:** [AZURE_SEARCH.md](AZURE_SEARCH.md), conexión a Search Free y RAG.
 
 **Contexto para RAG:** [RAG.md](RAG.md), preparación de mensajes y fuentes citables.

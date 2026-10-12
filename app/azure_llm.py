@@ -6,25 +6,30 @@ import httpx
 from azure.identity import AzureCliCredential
 
 
-def generate(messages: list[dict]) -> dict:
+def post_azure(deployment: str, operation: str, payload: dict) -> dict:
     endpoint = os.getenv('AZURE_OPENAI_ENDPOINT', '').rstrip('/')
     parsed = urlparse(endpoint)
     if (parsed.scheme != 'https' or not (parsed.hostname or '').endswith('.openai.azure.com')
             or parsed.username or parsed.password or parsed.query or parsed.fragment
             or parsed.path or parsed.port not in (None, 443)):
         raise ValueError('Configura AZURE_OPENAI_ENDPOINT con la URL HTTPS de tu recurso Azure OpenAI')
-    deployment = os.getenv('AZURE_OPENAI_DEPLOYMENT', 'chat-practicas')
     # Esta fase usa la sesión local de az login. ACA se conectará en una fase posterior.
     with AzureCliCredential() as credential:
         token = credential.get_token('https://cognitiveservices.azure.com/.default').token
         with httpx.Client(timeout=45, follow_redirects=False) as client:
             response = client.post(
-                f'{endpoint}/openai/deployments/{quote(deployment, safe="")}/chat/completions',
+                f'{endpoint}/openai/deployments/{quote(deployment, safe="")}/{operation}',
                 params={'api-version': '2024-10-21'},
                 headers={'Authorization': f'Bearer {token}'},
-                json={'messages': messages, 'max_completion_tokens': 500, 'temperature': 0.2})
+                json=payload)
             response.raise_for_status()
-            data = response.json()
+            return response.json()
+
+
+def generate(messages: list[dict]) -> dict:
+    deployment = os.getenv('AZURE_OPENAI_DEPLOYMENT', 'chat-practicas')
+    data = post_azure(deployment, 'chat/completions',
+                      {'messages': messages, 'max_completion_tokens': 500, 'temperature': 0.2})
     choice = data['choices'][0]
     return {'answer': choice['message'].get('content') or '',
             'finish_reason': choice['finish_reason'], 'usage': data.get('usage', {}),
