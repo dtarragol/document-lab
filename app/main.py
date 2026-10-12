@@ -61,6 +61,8 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
                 content_type TEXT NOT NULL, size_bytes INTEGER NOT NULL,
                 sha256 TEXT NOT NULL, created_at TEXT NOT NULL,
                 status TEXT NOT NULL, analysis TEXT)""")
+            connection.execute("""CREATE TABLE IF NOT EXISTS jobs (
+                document_id TEXT PRIMARY KEY, status TEXT NOT NULL)""")
         yield
 
     app = FastAPI(title="Document Lab · AI-200", version="0.1.0",
@@ -131,10 +133,25 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
         category = "invoice" if any(word in name for word in ("invoice", "factura")) else "other"
         result = Analysis(category=category, confidence=0.72, requires_review=True)
         with database() as connection:
+            if connection.execute("SELECT 1 FROM jobs WHERE document_id=? AND status='Pending'",
+                                  (str(document_id),)).fetchone():
+                raise HTTPException(409, "Análisis en cola: ejecuta el worker")
             connection.execute("UPDATE documents SET status = ?, analysis = ? WHERE id = ? AND analysis IS NULL",
                                ("Analyzed", result.model_dump_json(), str(document_id)))
         logger.info("document_analyzed id=%s simulated=true", document_id)
         return fetch(document_id)
+
+    @app.post("/documents/{document_id}/enqueue", status_code=202, tags=["Cola local"])
+    def enqueue(document_id: UUID):
+        fetch(document_id)
+        with database() as connection:
+            connection.execute('BEGIN IMMEDIATE')
+            row = connection.execute('SELECT analysis FROM documents WHERE id=?', (str(document_id),)).fetchone()
+            if row['analysis'] is not None:
+                return {"document_id": str(document_id), "status": "AlreadyAnalyzed"}
+            connection.execute("INSERT OR IGNORE INTO jobs VALUES (?, 'Pending')", (str(document_id),))
+            connection.execute("UPDATE documents SET status='Queued' WHERE id=?", (str(document_id),))
+        return {"document_id": str(document_id), "status": "Pending"}
 
     return app
 

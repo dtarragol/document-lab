@@ -7,6 +7,9 @@ FastAPI ofrece la interfaz interactiva en http://localhost:8000/docs.
 con tu sesión de Azure, sin SQLite ni archivos persistentes locales. El resto de
 esta guía describe el modo local (predeterminado).
 
+**Fase 3 preparada:** [COSMOS.md](COSMOS.md) explica la opción de metadatos
+en Cosmos DB y cómo probarla mientras se habilita el acceso a la región.
+
 ## Arrancar con Docker
 
 Abre Docker Desktop y espera a que el motor esté listo. Desde esta carpeta:
