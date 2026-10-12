@@ -61,3 +61,14 @@ ni respuestas en llm_calls; solo fecha, estado y consumo reportado por Azure.
 Esta API no tiene autenticación: mantener el servidor en 127.0.0.1. No publicar
 esta fase en ACA hasta integrar autenticación, almacenamiento e identidad administrada.
 Desactiva llamadas con ENABLE_AZURE_LLM=false. /rag/prepare continúa siendo gratuito.
+
+## Consultar el consumo local
+
+GET /usage muestra para el día UTC los intentos, límite, intentos restantes y tokens
+reportados, separados para generación y embeddings. Lee documents.db de la API y
+embeddings.db de DATA_DIR (la carpeta usada por la caché). No llama a Azure ni genera
+consumo del modelo. Incluye errores en el contador de intentos; no trata los errores
+sin usage como gratuitos. Los aciertos de caché de embeddings no consumen intentos.
+
+No incluye otros equipos, bases de datos, llamadas desde el portal, Azure Search,
+Storage, ACR, ACA ni impuestos. No es un cálculo de euros ni sustituye Cost Management.

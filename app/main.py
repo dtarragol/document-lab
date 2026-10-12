@@ -144,6 +144,14 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             connection.execute("SELECT 1").fetchone()
         return {"status": "ok", "analysis_mode": "simulated", "search_backend": search_backend}
 
+    @app.get('/usage', tags=['Consumo'])
+    def usage():
+        from app.usage import daily_usage
+        try:
+            return daily_usage(root)
+        except ValueError as error:
+            raise HTTPException(503, 'Revisa que los límites diarios sean números enteros') from error
+
     @app.post("/documents", response_model=Document, status_code=201, tags=["Documentos"])
     def upload(file: UploadFile = File(...)):
         document_id = uuid4()
