@@ -1,5 +1,7 @@
 # Document Lab — primera práctica AI-200
 
+**Recuperación en Azure:** [AZURE_SEARCH.md](AZURE_SEARCH.md), conexión a Search Free y RAG.
+
 **Contexto para RAG:** [RAG.md](RAG.md), preparación de mensajes y fuentes citables.
 
 **Búsqueda por contenido:** [SEARCH.md](SEARCH.md), índice local FTS5 y recuperación de fragmentos.

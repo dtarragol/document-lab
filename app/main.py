@@ -55,6 +55,18 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
         from app.azure_api import create_azure_app
         return create_azure_app(Document, Analysis, MAX_BYTES)
     root = Path(data_dir or os.getenv("DATA_DIR", "data")).resolve()
+    search_backend = os.getenv('SEARCH_BACKEND', 'local')
+    if search_backend not in ('local', 'azure'):
+        raise ValueError('SEARCH_BACKEND debe ser local o azure')
+
+    def search_operation(operation, *args):
+        import httpx
+        from azure.core.exceptions import AzureError
+        try:
+            return operation(*args)
+        except (httpx.HTTPError, AzureError, ValueError, RuntimeError, KeyError) as error:
+            logger.warning('azure_search_failed type=%s', type(error).__name__)
+            raise HTTPException(503, 'Error de Azure Search: revisa índice, permisos, tamaño y conectividad') from error
 
     @contextmanager
     def database():
@@ -114,7 +126,7 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
     def health():
         with database() as connection:
             connection.execute("SELECT 1").fetchone()
-        return {"status": "ok", "analysis_mode": "simulated"}
+        return {"status": "ok", "analysis_mode": "simulated", "search_backend": search_backend}
 
     @app.post("/documents", response_model=Document, status_code=201, tags=["Documentos"])
     def upload(file: UploadFile = File(...)):
@@ -211,6 +223,9 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
         except TextError as error:
             raise HTTPException(422, str(error)) from error
         chunks = chunk_text(text)
+        if search_backend == 'azure':
+            from app.azure_search import index_chunks
+            search_operation(index_chunks, str(document_id), document['filename'], chunks)
         with database() as connection:
             connection.execute('BEGIN IMMEDIATE')
             connection.execute('DELETE FROM document_search WHERE document_id=?', (str(document_id),))
@@ -219,7 +234,8 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             connection.execute('DELETE FROM document_chunks WHERE document_id=?', (str(document_id),))
             connection.executemany('INSERT INTO document_chunks (document_id, chunk_number, content) VALUES (?, ?, ?)',
                                    [(str(document_id), number, chunk) for number, chunk in enumerate(chunks)])
-        return {'document_id': str(document_id), 'indexed_characters': len(text), 'chunks': len(chunks)}
+        return {'document_id': str(document_id), 'indexed_characters': len(text), 'chunks': len(chunks),
+                'search_backend': search_backend}
 
     @app.get('/search', tags=['Búsqueda local'])
     def search(q: str = Query(min_length=1, max_length=200), limit: int = Query(default=10, ge=1, le=50)):
@@ -242,6 +258,11 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             expression = literal_query(q)
         except ValueError as error:
             raise HTTPException(422, str(error)) from error
+        if search_backend == 'azure':
+            from app.azure_search import retrieve_chunks
+            sources = search_operation(retrieve_chunks, q, top_k)
+            return {'query': q, 'count': len(sources), 'sources': sources,
+                    'retrieval_mode': 'azure_lexical', 'generated_answer': None}
         with database() as connection:
             rows = connection.execute('''SELECT d.id AS document_id, d.filename,
                 CAST(document_chunks.chunk_number AS INTEGER) AS chunk_number,
