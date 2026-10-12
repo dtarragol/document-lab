@@ -7,6 +7,7 @@ import sqlite3
 from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Literal
 from uuid import UUID, uuid4
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
@@ -34,6 +35,10 @@ class Document(BaseModel):
     created_at: str
     status: str
     analysis: Analysis | None = None
+
+
+class ReviewRequest(BaseModel):
+    decision: Literal['Approved', 'Rejected']
 
 
 def create_app(data_dir: Path | None = None) -> FastAPI:
@@ -68,6 +73,8 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
                 connection.execute('ALTER TABLE jobs ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0')
             if 'last_error' not in columns:
                 connection.execute('ALTER TABLE jobs ADD COLUMN last_error TEXT')
+            connection.execute('''CREATE TABLE IF NOT EXISTS reviews (
+                document_id TEXT PRIMARY KEY, decision TEXT NOT NULL, decided_at TEXT NOT NULL)''')
         yield
 
     app = FastAPI(title="Document Lab · AI-200", version="0.1.0",
@@ -167,6 +174,34 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             row = connection.execute('SELECT * FROM jobs WHERE document_id=?', (str(document_id),)).fetchone()
         if row is None:
             raise HTTPException(404, 'Trabajo no encontrado')
+        return dict(row)
+
+    @app.post('/documents/{document_id}/review', tags=['Revisión humana local'])
+    def review(document_id: UUID, request: ReviewRequest):
+        with database() as connection:
+            connection.execute('BEGIN IMMEDIATE')
+            row = connection.execute('SELECT analysis FROM documents WHERE id=?', (str(document_id),)).fetchone()
+            if row is None:
+                raise HTTPException(404, 'Documento no encontrado')
+            if row['analysis'] is None:
+                raise HTTPException(409, 'Primero debes analizar el documento')
+            existing = connection.execute('SELECT * FROM reviews WHERE document_id=?', (str(document_id),)).fetchone()
+            if existing:
+                if existing['decision'] != request.decision:
+                    raise HTTPException(409, 'El documento ya tiene una decisión diferente')
+                return dict(existing)
+            result = dict(document_id=str(document_id), decision=request.decision,
+                          decided_at=datetime.now(timezone.utc).isoformat())
+            connection.execute('INSERT INTO reviews VALUES (?, ?, ?)', tuple(result.values()))
+        return result
+
+    @app.get('/documents/{document_id}/review', tags=['Revisión humana local'])
+    def get_review(document_id: UUID):
+        fetch(document_id)
+        with database() as connection:
+            row = connection.execute('SELECT * FROM reviews WHERE document_id=?', (str(document_id),)).fetchone()
+        if row is None:
+            return {'document_id': str(document_id), 'decision': 'Pending', 'decided_at': None}
         return dict(row)
 
     @app.post('/jobs/{document_id}/retry', status_code=202, tags=['Cola local'])

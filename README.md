@@ -2,6 +2,8 @@
 
 **Práctica sin esperar a Azure:** [QUEUE.md](QUEUE.md), cola persistente y worker local.
 
+**Revisión humana:** [REVIEW.md](REVIEW.md), aprobar o rechazar después del análisis.
+
 API Python para subir documentos, consultar su estado y ejecutar un análisis simulado.
 FastAPI ofrece la interfaz interactiva en http://localhost:8000/docs.
 
