@@ -1,5 +1,44 @@
 # Práctica real de Service Bus
 
+## Caducidad del bloqueo
+
+Con la cola vacía y sin otros consumidores:
+
+```powershell
+python -m app.servicebus_lab send
+python -m app.servicebus_lab expire
+python -m app.servicebus_lab receive
+```
+
+expire recibe un mensaje en PeekLock, espera hasta locked_until_utc más tres segundos
+sin renovar, e intenta complete. Debe mostrar MessageLockLostError. Puede tardar
+alrededor de un minuto con el bloqueo predeterminado; espera a que termine.
+receive debe mostrar el mismo message_id y un delivery_count mayor antes de confirmar.
+No hagas varios expire seguidos: cuentan para maxDeliveryCount y pueden llevarlo a DLQ.
+El reloj del equipo debe estar sincronizado. Ante otros errores de red o autorización,
+el script los muestra como errores, no como prueba de caducidad.
+
+LockDuration limita cuánto tiempo conserva un consumidor su bloqueo. TTL limita
+la vida del mensaje: son conceptos distintos. Para un procesamiento largo se puede
+renovar el bloqueo, pero sigue siendo necesario tolerar duplicados.
+
+### Renovar antes de caducar
+
+```powershell
+python -m app.servicebus_lab send
+python -m app.servicebus_lab renew
+python -m app.servicebus_lab peek
+```
+
+renew espera aproximadamente la mitad del bloqueo inicial, llama a
+renew_message_lock y muestra la nueva fecha de caducidad. Después espera hasta
+superar el plazo original y confirma dentro del plazo renovado. Puede tardar
+aproximadamente un minuto. El último peek debe encontrar vacía una cola que solo
+contenía este mensaje. No hay procesamiento de IA: las esperas representan trabajo.
+Esta renovación es manual y única; para tareas largas existe AutoLockRenewer.
+Renovar no equivale a confirmar, no amplía TTL y puede fallar por pérdida de
+conexión o bloqueo. No garantiza ausencia de entregas duplicadas.
+
 El script app/servicebus_lab.py es independiente de FastAPI y SQLite. Todos los
 mensajes se guardan en Azure. Los identificadores de documento son ficticios:
 esta práctica estudia transporte y confirmación, no llama a modelos ni analiza archivos.

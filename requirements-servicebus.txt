@@ -1,3 +1,4 @@
 azure-identity>=1.19,<2
 azure-servicebus>=7.14,<8
 websocket-client>=1.8,<2
+azure-storage-blob>=12.24,<13
