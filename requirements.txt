@@ -4,3 +4,4 @@ python-multipart>=0.0.18,<1
 azure-identity>=1.19,<2
 azure-storage-blob>=12.24,<13
 azure-cosmos>=4.9,<5
+httpx>=0.27,<1

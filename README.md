@@ -1,5 +1,7 @@
 # Document Lab — primera práctica AI-200
 
+**Contexto para RAG:** [RAG.md](RAG.md), preparación de mensajes y fuentes citables.
+
 **Búsqueda por contenido:** [SEARCH.md](SEARCH.md), índice local FTS5 y recuperación de fragmentos.
 
 ## Práctica completa en un comando

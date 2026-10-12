@@ -12,9 +12,10 @@ from uuid import UUID, uuid4
 
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from app.text import TextError, analyze_text, extract_text
 from app.retrieval import chunk_text, literal_query
+from app.rag import prepare_messages
 
 logger = logging.getLogger("document_lab")
 logging.basicConfig(level=logging.INFO)
@@ -41,6 +42,12 @@ class Document(BaseModel):
 
 class ReviewRequest(BaseModel):
     decision: Literal['Approved', 'Rejected']
+
+
+class RagRequest(BaseModel):
+    question: str = Field(min_length=1, max_length=1000)
+    search_query: str = Field(min_length=1, max_length=200)
+    top_k: int = Field(default=3, ge=1, le=10)
 
 
 def create_app(data_dir: Path | None = None) -> FastAPI:
@@ -81,6 +88,8 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
                 USING fts5(document_id UNINDEXED, content, tokenize='unicode61')''')
             connection.execute('''CREATE VIRTUAL TABLE IF NOT EXISTS document_chunks
                 USING fts5(document_id UNINDEXED, chunk_number UNINDEXED, content, tokenize='unicode61')''')
+            connection.execute('''CREATE TABLE IF NOT EXISTS llm_calls (
+                id TEXT PRIMARY KEY, day TEXT NOT NULL, status TEXT NOT NULL, usage TEXT)''')
         yield
 
     app = FastAPI(title="Document Lab · AI-200", version="0.1.0",
@@ -243,6 +252,51 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
                 (expression, top_k)).fetchall()
         return {'query': q, 'count': len(rows), 'sources': [dict(row) for row in rows],
                 'retrieval_mode': 'lexical', 'generated_answer': None}
+
+    @app.post('/rag/prepare', tags=['RAG local'])
+    def prepare_rag(request: RagRequest):
+        if not request.question.strip():
+            raise HTTPException(422, 'Introduce una pregunta')
+        retrieved = retrieve(request.search_query, request.top_k)
+        return prepare_messages(request.question, retrieved['sources'])
+
+    @app.post('/rag/ask', tags=['RAG con Azure'])
+    def ask_rag(request: RagRequest):
+        from app.azure_llm import generate
+        import httpx
+        from azure.core.exceptions import AzureError
+        if os.getenv('ENABLE_AZURE_LLM', 'false').lower() != 'true':
+            raise HTTPException(503, 'Activa ENABLE_AZURE_LLM=true para realizar llamadas facturables')
+        if request.top_k > 3:
+            raise HTTPException(422, 'Esta práctica admite como máximo 3 fragmentos por llamada al modelo')
+        context = prepare_rag(request)
+        if not context['sources']:
+            return {'answer': 'No se han encontrado fuentes para responder.', 'sources': [], 'status': 'no_sources', 'usage': {}}
+        if sum(len(message['content']) for message in context['messages']) > 12000:
+            raise HTTPException(422, 'Contexto demasiado largo: reduce top_k o utiliza fragmentos más cortos')
+        try:
+            limit = int(os.getenv('LLM_DAILY_CALL_LIMIT', '20'))
+        except ValueError:
+            raise HTTPException(503, 'LLM_DAILY_CALL_LIMIT debe ser un entero')
+        call_id = str(uuid4())
+        day = datetime.now(timezone.utc).date().isoformat()
+        with database() as connection:
+            connection.execute('BEGIN IMMEDIATE')
+            count = connection.execute('SELECT COUNT(*) FROM llm_calls WHERE day=?', (day,)).fetchone()[0]
+            if count >= limit:
+                raise HTTPException(429, 'Límite diario de llamadas alcanzado')
+            connection.execute('INSERT INTO llm_calls VALUES (?, ?, ?, NULL)', (call_id, day, 'Reserved'))
+        try:
+            result = generate(context['messages'])
+        except (ValueError, AzureError, httpx.HTTPError, KeyError, IndexError) as error:
+            with database() as connection:
+                connection.execute("UPDATE llm_calls SET status='Failed' WHERE id=?", (call_id,))
+            logger.warning('llm_call_failed id=%s type=%s', call_id, type(error).__name__)
+            raise HTTPException(503, 'Falló la llamada al modelo: revisa endpoint, az login, permisos y cuota') from error
+        with database() as connection:
+            connection.execute("UPDATE llm_calls SET status='Completed', usage=? WHERE id=?",
+                               (json.dumps(result['usage']), call_id))
+        return dict(result, sources=context['sources'], status='generated', call_id=call_id)
 
     @app.post('/documents/{document_id}/review', tags=['Revisión humana local'])
     def review(document_id: UUID, request: ReviewRequest):
