@@ -63,6 +63,11 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
                 status TEXT NOT NULL, analysis TEXT)""")
             connection.execute("""CREATE TABLE IF NOT EXISTS jobs (
                 document_id TEXT PRIMARY KEY, status TEXT NOT NULL)""")
+            columns = {row['name'] for row in connection.execute('PRAGMA table_info(jobs)')}
+            if 'attempts' not in columns:
+                connection.execute('ALTER TABLE jobs ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0')
+            if 'last_error' not in columns:
+                connection.execute('ALTER TABLE jobs ADD COLUMN last_error TEXT')
         yield
 
     app = FastAPI(title="Document Lab · AI-200", version="0.1.0",
@@ -149,9 +154,37 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             row = connection.execute('SELECT analysis FROM documents WHERE id=?', (str(document_id),)).fetchone()
             if row['analysis'] is not None:
                 return {"document_id": str(document_id), "status": "AlreadyAnalyzed"}
-            connection.execute("INSERT OR IGNORE INTO jobs VALUES (?, 'Pending')", (str(document_id),))
+            job = connection.execute('SELECT status FROM jobs WHERE document_id=?', (str(document_id),)).fetchone()
+            if job and job['status'] == 'DeadLetter':
+                raise HTTPException(409, 'Trabajo en cola de errores; revisa GET /jobs/{document_id}')
+            connection.execute("INSERT OR IGNORE INTO jobs (document_id, status) VALUES (?, 'Pending')", (str(document_id),))
             connection.execute("UPDATE documents SET status='Queued' WHERE id=?", (str(document_id),))
         return {"document_id": str(document_id), "status": "Pending"}
+
+    @app.get('/jobs/{document_id}', tags=['Cola local'])
+    def get_job(document_id: UUID):
+        with database() as connection:
+            row = connection.execute('SELECT * FROM jobs WHERE document_id=?', (str(document_id),)).fetchone()
+        if row is None:
+            raise HTTPException(404, 'Trabajo no encontrado')
+        return dict(row)
+
+    @app.post('/jobs/{document_id}/retry', status_code=202, tags=['Cola local'])
+    def retry_job(document_id: UUID):
+        with database() as connection:
+            connection.execute('BEGIN IMMEDIATE')
+            row = connection.execute('SELECT status FROM jobs WHERE document_id=?', (str(document_id),)).fetchone()
+            if row is None:
+                raise HTTPException(404, 'Trabajo no encontrado')
+            if row['status'] != 'DeadLetter':
+                raise HTTPException(409, 'Solo se pueden recuperar trabajos en DeadLetter')
+            document = connection.execute('SELECT analysis FROM documents WHERE id=?', (str(document_id),)).fetchone()
+            if document is None or document['analysis'] is not None:
+                raise HTTPException(409, 'El documento no existe o ya está analizado')
+            connection.execute("UPDATE jobs SET status='Pending', attempts=0, last_error=NULL WHERE document_id=?",
+                               (str(document_id),))
+            connection.execute("UPDATE documents SET status='Queued' WHERE id=?", (str(document_id),))
+        return {'document_id': str(document_id), 'status': 'Pending'}
 
     return app
 

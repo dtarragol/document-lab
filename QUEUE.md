@@ -44,4 +44,34 @@ durante el cálculo porque es inmediato; esto serializa los workers y bloquea ot
 escrituras brevemente. No uses este patrón para llamadas lentas a IA.
 Service Bus requiere otra implementación: recepción, bloqueo, complete, abandon,
 reentregas y dead-letter queue. Esta práctica no reproduce esas garantías ni tiene
-reintentos limitados o cola de errores. No ejecutes este worker contra el modo Azure.
+las garantías de reentrega de Service Bus. No ejecutes este worker contra el modo Azure.
+
+## Fallos controlados y cola de errores
+
+Reinicia primero la API: actualiza automáticamente la tabla jobs existente con
+attempts y last_error. Detén cualquier worker continuo para que no recoja tu trabajo.
+Sube un documento nuevo y ejecuta enqueue. En otra terminal, con las mismas variables:
+
+```powershell
+.\.venv\Scripts\python.exe -m app.worker --once --simulate-failure
+```
+
+Consulta GET /jobs/{document_id}: attempts=1, status=Pending y last_error explica el fallo.
+Repite dos veces el comando: al tercer fallo pasa a DeadLetter y el documento a Failed.
+Los workers omiten estos trabajos; enqueue devuelve 409. Para esta práctica usa un nuevo
+documento si quieres empezar de nuevo, o usa la recuperación manual descrita abajo. Los trabajos de error se conservan en la misma
+tabla, diferenciados por estado; no son una cola Azure real.
+
+También prueba un solo fallo seguido de --once sin --simulate-failure: el segundo
+intento completa el trabajo y limpia last_error. Aquí los reintentos son manuales,
+sin backoff. Solo los fallos controlados cuentan para este límite: un error inesperado
+de SQLite o una interrupción revierte la transacción y detiene el proceso.
+
+## Recuperar un trabajo apartado
+
+Detén el worker continuo. Consulta GET /jobs/{id} y revisa last_error antes de recuperar.
+Ejecuta POST /jobs/{id}/retry para un trabajo DeadLetter: vuelve a Pending,
+reinicia attempts a 0 y limpia last_error. El documento vuelve a Queued.
+Ejecuta el worker con --once, sin --simulate-failure: quedará Completed / Analyzed.
+La recuperación solo admite DeadLetter; otros estados devuelven 409 y un ID sin trabajo 404.
+Esta práctica reinicia el contador y no conserva un historial de errores de ciclos anteriores.
