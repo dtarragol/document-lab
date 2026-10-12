@@ -45,3 +45,24 @@ la pregunta: top_k no es una garantía de relevancia. No hay umbral ni evaluaci�
 de relevancia en esta fase. Compara las fuentes, no solo la respuesta del modelo.
 Para volver al índice anterior: AZURE_SEARCH_INDEX=document-chunks-v1,
 AZURE_SEARCH_VECTORS=false y AZURE_SEARCH_MODE=lexical. Reinicia la API.
+
+## Comparar los tres modos automáticamente
+
+Con la API Azure arrancada y documentos indexados en el índice vectorial, ejecuta
+en otra terminal desde document-lab:
+
+```powershell
+.\.venv\Scripts\python.exe -m app.compare_search --query "cómo encontrar documentos con significado parecido"
+```
+
+Consulta /retrieve tres veces, sin llamar a /rag/ask. Muestra fuentes, fragmentos y
+tiempos, y guarda el detalle completo en reports/search-<fecha>.json. La consulta
+vectorial e híbrida comparten el embedding en caché: normalmente requieren una sola
+llamada nueva de embeddings, ninguna si ya está en caché. No incluye el consumo de
+embeddings en el informe: el contador y usage permanecen en embeddings.db.
+
+El informe no calcula precisión ni detecta alucinaciones. Revisa si cada fragmento
+responde a la consulta. Tener más resultados no equivale a mayor relevancia.
+Los tiempos incluyen red, autenticación y creación/lectura de caché; no son una
+medición aislada del buscador y la primera consulta vectorial puede tardar más.
+Los informes contienen extractos de tus documentos y se excluyen de Git.
