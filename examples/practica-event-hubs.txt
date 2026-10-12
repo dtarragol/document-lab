@@ -1,0 +1,5 @@
+Azure Event Hubs
+Servicio de ingesta de flujos de eventos de gran volumen, por ejemplo telemetría de dispositivos y sensores.
+Organiza el flujo en particiones. Los grupos de consumidores permiten que aplicaciones diferentes lean el mismo flujo de forma independiente.
+Los consumidores registran checkpoints para recordar su progreso y pueden releer eventos dentro del periodo de retención.
+Se utiliza para recoger millones de mediciones y alimentar análisis de datos en streaming, según la capacidad configurada.

@@ -1,0 +1,8 @@
+[
+  {"query": "Service Bus", "expected_filename": "practica-service-bus.txt"},
+  {"query": "Event Grid", "expected_filename": "practica-event-grid.txt"},
+  {"query": "Event Hubs", "expected_filename": "practica-event-hubs.txt"},
+  {"query": "Cómo procesar pedidos en orden y enviar mensajes fallidos a una cola de errores", "expected_filename": "practica-service-bus.txt"},
+  {"query": "Cómo reaccionar cuando se crea un archivo en almacenamiento", "expected_filename": "practica-event-grid.txt"},
+  {"query": "Dónde recibir millones de lecturas de sensores para analizarlas en streaming", "expected_filename": "practica-event-hubs.txt"}
+]

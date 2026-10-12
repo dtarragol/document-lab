@@ -61,6 +61,16 @@ def main():
     target.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
     for result in report['results']:
         print(f"{result['mode']}: aciertos={result['hit_rate']:.0%}, MRR={result['mrr']:.3f}, errores={result['errors']}")
+        for case in result['cases']:
+            print(f"  Consulta: {case['query']}")
+            print(f"    Esperado: {case['expected_filename']}")
+            if 'error' in case:
+                print(f"    Error HTTP {case['http_status']}: {case['error']}")
+            elif case['rank'] is not None:
+                print(f"    Encontrado en posición {case['rank']}")
+            else:
+                found = ', '.join(dict.fromkeys(case['retrieved_filenames'])) or '(ningún fragmento)'
+                print(f"    No encontrado. Devueltos: {found}")
     print(f'Informe: {target.resolve()}')
     print('Sin generación. Vector/hybrid pueden consumir embeddings. Los errores cuentan como fallos.')
     if any(r['errors'] for r in report['results']):

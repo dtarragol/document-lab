@@ -1,5 +1,27 @@
 # Evaluar recuperación
 
+## Práctica con tres servicios
+
+Sube los tres archivos examples/practica-service-bus.txt,
+examples/practica-event-grid.txt y examples/practica-event-hubs.txt mediante
+POST /documents. Ejecuta POST /documents/{id}/index para cada identificador.
+Después ejecuta:
+
+```powershell
+python -m app.evaluate_search --cases examples/evaluation-messaging.json --modes lexical vector hybrid
+```
+
+Los tres primeros casos buscan nombres explícitos. Los siguientes describen necesidades
+sin nombrar el servicio. Compara los resultados: la búsqueda léxica actual exige todos
+los términos, por lo que las preguntas largas pueden no coincidir. La vectorial puede
+encontrar equivalencias semánticas; no garantiza acertar. Si conservas otros documentos
+en el índice también compiten por las primeras posiciones. No se exige un 100%.
+
+El evaluador muestra en consola el archivo esperado y los encontrados para cada fallo.
+Esta práctica utiliza fragmentos didácticos, no preguntas oficiales del examen.
+
+## Tus propios documentos
+
 Con la API arrancada y tus documentos indexados, ajusta examples/evaluation.json:
 query es una pregunta de prueba y expected_filename el nombre exacto del documento
 que debería aparecer. El ejemplo usa el dossier de Cosmos; cámbialo si subiste otro.

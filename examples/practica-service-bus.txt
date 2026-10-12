@@ -1,0 +1,6 @@
+Azure Service Bus
+Servicio de mensajería empresarial para coordinar procesos mediante colas y temas con suscripciones.
+Para tramitar pedidos de forma fiable, un consumidor recibe y confirma cada mensaje.
+Las sesiones permiten procesar en orden los mensajes relacionados que comparten una sesión.
+Los mensajes que no se pueden procesar pueden acabar en la cola de mensajes fallidos, llamada dead-letter queue.
+Admite transacciones. Las características y límites dependen del nivel contratado.

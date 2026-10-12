@@ -1,0 +1,5 @@
+Azure Event Grid
+Servicio de distribución de eventos para conectar productores con consumidores interesados.
+Un ejemplo es notificar que se ha creado un blob en Azure Storage y activar una función que procese el archivo.
+El evento describe algo que ha ocurrido. Las suscripciones y filtros seleccionan los eventos de interés.
+Los consumidores deben contemplar entregas repetidas y diseñar un procesamiento idempotente.
